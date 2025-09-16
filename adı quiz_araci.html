@@ -347,10 +347,11 @@ document.getElementById("searchBox").addEventListener("input", (e) => {
 });
 
 document.getElementById("downloadTemplate").addEventListener("click", () => {
-  const csv = 'question,A,B,C,D,correct,explanation,tags\n'
-    + '"Hangi ifade doğrudur? 2 + 2 = ?",3,4,5,22,B,"2+2=4.","math|easy"\n'
-    + '"Kas-iskelet sistemi kısaltması hangisidir?",CNS,PNS,MSK,GI,C,"Musculoskeletal = MSK.","fizyoterapi"\n'
-    + '"Almanca ''günaydın'' hangisidir?",Guten Morgen,Gute Nacht,Guten Abend,Tschüss,A,"Sabah selamlaması.","almanca|A1"\n';
+  const csv = `question,A,B,C,D,correct,explanation,tags
+"Hangi ifade doğrudur? 2 + 2 = ?",3,4,5,22,B,"2+2=4.","math|easy"
+"Kas-iskelet sistemi kısaltması hangisidir?",CNS,PNS,MSK,GI,C,"Musculoskeletal = MSK.","fizyoterapi"
+"Almanca 'günaydın' hangisidir?",Guten Morgen,Gute Nacht,Guten Abend,Tschüss,A,"Sabah selamlaması.","almanca|A1"
+`;
   const blob = new Blob([csv], {type: "text/csv;charset=utf-8;"});
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
