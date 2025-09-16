@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Hızlı Quiz Aracı — CSV/JSON ile Toplu Soru</title>
+  <style>
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", "Apple Color Emoji", "Segoe UI Emoji"; margin: 24px; line-height: 1.5; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    h1 { font-size: 20px; margin: 0; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .hint { font-size: 12px; color: #555; }
+    #score { font-weight: 700; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .btn { border: 1px solid #ccc; padding: 8px 12px; border-radius: 8px; cursor: pointer; background: #fafafa; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .file { border: 1px dashed #bbb; padding: 8px 12px; border-radius: 8px; background: #fff; }
+    details { margin-top: 8px; }
+    textarea { width: 100%; min-height: 120px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .container { margin-top: 16px; max-width: 980px; }
+    .qcard { border: 1px solid #e6e6e6; border-radius: 12px; padding: 16px; margin: 12px 0; background: #fff; }
+    .qhead { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+    .qtitle { font-weight: 700; }
+    .qmeta { font-size: 12px; color: #666; }
+    .opts { margin-top: 12px; display: grid; gap: 8px; }
+    .opt { padding: 10px 12px; border: 1px solid #dcdcdc; border-radius: 10px; background: #fbfbfb; cursor: pointer; }
+    .opt:hover { background: #f5f5f5; }
+    .opt.correct { background: #eaf7ea; border-color: #a6d8a6; }
+    .opt.wrong   { background: #fdeaea; border-color: #f0aaaa; }
+    .opt.disabled { pointer-events: none; opacity: 0.8; }
+    .explain { margin-top: 8px; font-size: 14px; color: #333; display: none; }
+    .explain.show { display: block; }
+    footer { margin-top: 24px; font-size: 12px; color: #666; }
+    .pill { font-size: 11px; padding: 2px 8px; border: 1px solid #ddd; border-radius: 999px; background: #fafafa; }
+    .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .search { padding: 6px 10px; border: 1px solid #ccc; border-radius: 8px; width: 240px; }
+    .sep { height: 1px; background: #eee; margin: 10px 0; border: none; }
+    .hidden { display: none; }
+    .kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; background: #f3f3f3; border: 1px solid #ddd; padding: 0 6px; border-radius: 6px; }
+    .tag { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid #ddd; background: #fafafa; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Hızlı Quiz Aracı</h1>
+    <div class="actions">
+      <span id="score" class="pill">Skor: 0/0</span>
+      <button class="btn" id="shuffleBtn" title="Soruları karıştır">Karıştır</button>
+      <button class="btn" id="resetBtn" title="Seçimleri sıfırla">Sıfırla</button>
+    </div>
+  </header>
+
+  <div class="row" style="margin-top:10px;">
+    <input type="file" id="fileInput" class="file" accept=".csv,.tsv,.txt,.json" />
+    <button class="btn" id="loadDemoBtn">Örnek veri yükle</button>
+  </div>
+
+  <details>
+    <summary><strong>Toplu Soru Ekleme</strong> — CSV/TSV ya da JSON yapıştırın</summary>
+    <div class="container">
+      <p class="hint"><strong>CSV/TSV başlıkları:</strong> <code>question,A,B,C,D,correct,explanation,tags(optional)</code>
+      <br/> <strong>correct</strong> alanı: <code>A</code> | <code>B</code> | <code>C</code> | <code>D</code>. <br/>
+      <strong>JSON şeması</strong> her soru için:
+      <code>{ "question": "...", "options": ["...","...","...","..."], "answer": 0-3, "explanation": "..." }</code>
+      </p>
+      <textarea id="pasteArea" placeholder="Buraya CSV/TSV veya JSON yapıştırın..."></textarea>
+      <div class="toolbar">
+        <button class="btn" id="loadFromPaste">Yükle</button>
+        <button class="btn" id="downloadTemplate">Şablon CSV indir</button>
+      </div>
+    </div>
+  </details>
+
+  <hr class="sep"/>
+
+  <div class="toolbar">
+    <input type="text" id="searchBox" class="search" placeholder="Sorularda ara (başlık & etiketler)"/>
+    <span id="countBadge" class="tag">0 soru</span>
+  </div>
+
+  <div id="quiz" class="container"></div>
+
+  <footer>
+    <p><strong>İpucu:</strong> Seçeneğe <span class="kbd">tıkla</span> → anında <em>Doğru/Yanlış</em> dönüt ve açıklama. Dosya/JSON yükleyerek toplu ekleyin. <span class="kbd">Karıştır</span> soruları karıştırır, <span class="kbd">Sıfırla</span> tüm seçimleri temizler.</p>
+  </footer>
+
+<script>
+function parseDelimited(text, delimiter=",") {
+  const rows = [];
+  let i = 0, field = "", row = [], inQuotes = false;
+  const dlm = delimiter;
+  while (i < text.length) {
+    const char = text[i];
+    if (inQuotes) {
+      if (char === '"') {
+        if (text[i+1] === '"') { field += '"'; i++; }
+        else { inQuotes = false; }
+      } else {
+        field += char;
+      }
+    } else {
+      if (char === '"') inQuotes = true;
+      else if (char === dlm) { row.push(field); field = ""; }
+      else if (char === "\n") { row.push(field); rows.push(row); row = []; field=""; }
+      else if (char === "\r") { }
+      else { field += char; }
+    }
+    i++;
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
+
+let QUESTIONS = [];
+let SCORE = 0;
+let ANSWERED = 0;
+
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+function updateScore() {
+  const scoreEl = document.getElementById("score");
+  scoreEl.textContent = `Skor: ${SCORE}/${QUESTIONS.length}`;
+}
+
+function updateCount() {
+  const badge = document.getElementById("countBadge");
+  badge.textContent = `${QUESTIONS.length} soru`;
+}
+
+function renderQuiz(filterText = "") {
+  const root = document.getElementById("quiz");
+  root.innerHTML = "";
+  const ft = filterText.trim().toLowerCase();
+
+  QUESTIONS.forEach((q, idx) => {
+    const tagStr = (q.tags || []).join(" ").toLowerCase();
+    if (ft && !q.question.toLowerCase().includes(ft) && !tagStr.includes(ft)) return;
+
+    const card = document.createElement("div");
+    card.className = "qcard";
+
+    const head = document.createElement("div");
+    head.className = "qhead";
+    const title = document.createElement("div");
+    title.className = "qtitle";
+    title.textContent = q.question;
+    const meta = document.createElement("div");
+    meta.className = "qmeta";
+    meta.innerHTML = `<span class="pill">Soru ${idx+1}</span> ` + (q.tags && q.tags.length ? q.tags.map(t=>`<span class="pill">${t}</span>`).join(" ") : "");
+
+    head.appendChild(title); head.appendChild(meta);
+    card.appendChild(head);
+
+    const opts = document.createElement("div");
+    opts.className = "opts";
+
+    q.options.forEach((opt, oi) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "opt";
+      btn.textContent = opt;
+
+      btn.addEventListener("click", () => {
+        if (btn.classList.contains("disabled")) return;
+
+        const correct = (oi === q.answer);
+        if (correct) {
+          btn.classList.add("correct");
+          if (!q._answered) { SCORE++; updateScore(); }
+        } else {
+          btn.classList.add("wrong");
+          Array.from(opts.children).forEach((child, ci) => {
+            if (ci === q.answer) child.classList.add("correct");
+          });
+        }
+        Array.from(opts.children).forEach(ch => ch.classList.add("disabled"));
+        q._answered = true;
+
+        if (q.explanation) {
+          exp.classList.add("show");
+        }
+      });
+
+      opts.appendChild(btn);
+    });
+
+    const exp = document.createElement("div");
+    exp.className = "explain";
+    exp.textContent = q.explanation || "";
+    card.appendChild(opts);
+    card.appendChild(exp);
+    root.appendChild(card);
+  });
+
+  updateScore();
+  updateCount();
+}
+
+function fromCSV(text, delimiter=",") {
+  const rows = parseDelimited(text.trim(), delimiter).filter(r => r.length && r.join("").trim() !== "");
+  if (!rows.length) return [];
+
+  const header = rows[0].map(h => h.trim().toLowerCase());
+  const hasHeader = header.includes("question") || header.includes("a") || header.includes("correct");
+  const dataRows = hasHeader ? rows.slice(1) : rows;
+
+  const colIndex = (name) => header.indexOf(name);
+  const idxQ = colIndex("question");
+  const idxA = colIndex("a");
+  const idxB = colIndex("b");
+  const idxC = colIndex("c");
+  const idxD = colIndex("d");
+  const idxCorrect = colIndex("correct");
+  const idxExp = colIndex("explanation");
+  const idxTags = colIndex("tags");
+
+  return dataRows.map((r) => {
+    const q = (idxQ >= 0 ? r[idxQ] : r[0] || "").trim();
+    const A = (idxA >= 0 ? r[idxA] : r[1] || "").trim();
+    const B = (idxB >= 0 ? r[idxB] : r[2] || "").trim();
+    const C = (idxC >= 0 ? r[idxC] : r[3] || "").trim();
+    const D = (idxD >= 0 ? r[idxD] : r[4] || "").trim();
+    const corr = (idxCorrect >= 0 ? (r[idxCorrect] || "").trim().toUpperCase() : "A");
+    const exp = (idxExp >= 0 ? (r[idxExp] || "").trim() : "");
+    const tags = (idxTags >= 0 ? (r[idxTags] || "").trim() : "");
+
+    const answer = {A:0, B:1, C:2, D:3}[corr] ?? 0;
+    const tagArr = tags ? tags.split("|").map(s=>s.trim()).filter(Boolean) : [];
+
+    return {
+      question: q,
+      options: [A,B,C,D],
+      answer,
+      explanation: exp,
+      tags: tagArr
+    };
+  }).filter(q => q.question && q.options.some(Boolean));
+}
+
+function fromJSON(text) {
+  const arr = JSON.parse(text);
+  return arr.map(item => ({
+    question: String(item.question || "").trim(),
+    options: Array.isArray(item.options) ? item.options.map(String) : [String(item.A||""), String(item.B||""), String(item.C||""), String(item.D||"")],
+    answer: typeof item.answer === "number" ? item.answer : ({A:0,B:1,C:2,D:3}[(item.correct||"A").toUpperCase()] ?? 0),
+    explanation: String(item.explanation || ""),
+    tags: Array.isArray(item.tags) ? item.tags.map(String) : (String(item.tags||"").split("|").map(s=>s.trim()).filter(Boolean))
+  })).filter(q => q.question && q.options && q.options.length);
+}
+
+const DEMO = [
+  {
+    question: "Hangi ifade doğrudur? 2 + 2 = ?",
+    options: ["3", "4", "5", "22"],
+    answer: 1,
+    explanation: "2 + 2 işleminin sonucu 4'tür.",
+    tags: ["math","easy"]
+  },
+  {
+    question: "Kas-iskelet sistemi kısaltması hangisidir?",
+    options: ["CNS", "PNS", "MSK", "GI"],
+    answer: 2,
+    explanation: "Musculoskeletal = MSK.",
+    tags: ["fizyoterapi"]
+  },
+  {
+    question: "Almanca 'günaydın' hangisidir?",
+    options: ["Guten Morgen", "Gute Nacht", "Guten Abend", "Tschüss"],
+    answer: 0,
+    explanation: "Sabah selamlaması: Guten Morgen.",
+    tags: ["almanca","A1"]
+  }
+];
+
+document.getElementById("loadDemoBtn").addEventListener("click", () => {
+  QUESTIONS = DEMO.map(x=>({...x}));
+  SCORE = 0; ANSWERED = 0;
+  renderQuiz(document.getElementById("searchBox").value);
+});
+
+document.getElementById("fileInput").addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    let text = reader.result;
+    let parsed = [];
+    try {
+      if (file.name.toLowerCase().endsWith(".json")) {
+        parsed = fromJSON(text);
+      } else if (file.name.toLowerCase().endsWith(".tsv")) {
+        parsed = fromCSV(text, "\t");
+      } else {
+        parsed = fromCSV(text, ",");
+      }
+    } catch (err) {
+      alert("Dosya okunamadı: " + err.message);
+      return;
+    }
+    QUESTIONS = parsed;
+    SCORE = 0; ANSWERED = 0;
+    renderQuiz(document.getElementById("searchBox").value);
+  };
+  reader.readAsText(file, "UTF-8");
+});
+
+document.getElementById("loadFromPaste").addEventListener("click", () => {
+  const text = document.getElementById("pasteArea").value.trim();
+  if (!text) return;
+  let parsed = [];
+  try {
+    if (text.startsWith("[") || text.startsWith("{")) {
+      parsed = fromJSON(text);
+    } else if (text.includes("\t")) {
+      parsed = fromCSV(text, "\t");
+    } else {
+      parsed = fromCSV(text, ",");
+    }
+  } catch (e) {
+    alert("İçe aktarım hatası: " + e.message);
+    return;
+  }
+  QUESTIONS = parsed;
+  SCORE = 0; ANSWERED = 0;
+  renderQuiz(document.getElementById("searchBox").value);
+});
+
+document.getElementById("shuffleBtn").addEventListener("click", () => {
+  QUESTIONS = shuffle(QUESTIONS);
+  renderQuiz(document.getElementById("searchBox").value);
+});
+
+document.getElementById("resetBtn").addEventListener("click", () => {
+  QUESTIONS.forEach(q => delete q._answered);
+  SCORE = 0;
+  renderQuiz(document.getElementById("searchBox").value);
+});
+
+document.getElementById("searchBox").addEventListener("input", (e) => {
+  renderQuiz(e.target.value);
+});
+
+document.getElementById("downloadTemplate").addEventListener("click", () => {
+  const csv = 'question,A,B,C,D,correct,explanation,tags\n'
+    + '"Hangi ifade doğrudur? 2 + 2 = ?",3,4,5,22,B,"2+2=4.","math|easy"\n'
+    + '"Kas-iskelet sistemi kısaltması hangisidir?",CNS,PNS,MSK,GI,C,"Musculoskeletal = MSK.","fizyoterapi"\n'
+    + '"Almanca ''günaydın'' hangisidir?",Guten Morgen,Gute Nacht,Guten Abend,Tschüss,A,"Sabah selamlaması.","almanca|A1"\n';
+  const blob = new Blob([csv], {type: "text/csv;charset=utf-8;"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "quiz_template.csv";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+});
+
+QUESTIONS = DEMO.map(x=>({...x}));
+renderQuiz();
+</script>
+</body>
+</html>
